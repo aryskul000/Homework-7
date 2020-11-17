@@ -1,1 +1,220 @@
-# Homework-7
+---
+title: "Homework 7"
+author: "Adil Ryskulov"
+date: "11/12/2020"
+output: html_document
+---
+
+# Group Members
+Adil Ryskulov
+Zhanna Sarsenova
+MST Parvin
+
+
+
+```{r}
+data_use1$earn_lastyr <- as.factor(data_use1$ERNYR_P)
+levels(data_use1$earn_lastyr) <- c("0","$01-$4999","$5000-$9999","$10000-$14999","$15000-$19999","$20000-$24999","$25000-$34999","$35000-$44999","$45000-$54999","$55000-$64999","$65000-$74999","$75000 and over",NA,NA,NA)
+```
+
+
+
+## Analyzing Health Insurance Coverage
+
+In this analysis we decided to select individuals aged between 26 to 65 years old. This age group was selected based on two facts where indudvuduals under 26 are eligible to be covered by their parents insurence cverages, and indivuduals who turn 65 must apply for medicare insurence.
+
+```{r}
+dat2 <- subset(data_use1, ((AGE_P > 26) & (AGE_P < 65)))
+```
+
+
+
+## First, we run logit regressional function for subset of individuals between 26 and 65
+
+```{r}
+model_logit1 <- glm(NOTCOV ~ AGE_P + I(AGE_P^2) + female + AfAm + Asian + RaceOther  
+                    + Hispanic + educ_hs + educ_smcoll + educ_as + educ_bach + educ_adv 
+                    + married + widowed + divorc_sep + veteran_stat + REGION + region_born,
+                    family = binomial, data = dat2)
+summary(model_logit1)
+```
+
+A dymmy variable NOTCOV represents condition where individual does not have a helth insurance, which means that possitive values predicting how varieble negatively effect on individual's health insurance precens.
+
+```{r}
+d_region <- data.frame(model.matrix(~ dat2$REGION))
+d_region_born <- data.frame(model.matrix(~ factor(dat2$region_born)))
+dat_for_analysis_sub <- data.frame(
+  dat2$NOTCOV,
+  dat2$AGE_P,
+  dat2$female,
+  dat2$AfAm,
+  dat2$Asian,
+  dat2$RaceOther,
+  dat2$Hispanic,
+  dat2$educ_hs,
+  dat2$educ_smcoll,
+  dat2$educ_as,
+  dat2$educ_bach,
+  dat2$educ_adv,
+  dat2$married,
+  dat2$widowed,
+  dat2$divorc_sep,
+  d_region[,2:4],
+  d_region_born[,2:12]) # need [] since model.matrix includes intercept term
+names(dat_for_analysis_sub) <- c("NOTCOV",
+                                 "Age",
+                                 "female",
+                                 "AfAm",
+                                 "Asian",
+                                 "RaceOther",
+                                 "Hispanic",
+                                 "educ_hs",
+                                 "educ_smcoll",
+                                 "educ_as",
+                                 "educ_bach",
+                                 "educ_adv",
+                                 "married",
+                                 "widowed",
+                                 "divorc_sep",
+                                 "Region.Midwest",
+                                 "Region.South",
+                                 "Region.West",
+                                 "born.Mex.CentAm.Carib",
+                                 "born.S.Am",
+                                 "born.Eur",
+                                 "born.f.USSR",
+                                 "born.Africa",
+                                 "born.MidE",
+                                 "born.India.subc",
+                                 "born.Asia",
+                                 "born.SE.Asia",
+                                 "born.elsewhere",
+                                 "born.unknown")
+```
+
+By using provided data.frame and standardizing code we standardized the variable and split into training and test sets. The training test used comprises 150% of overall observations while other 80% will be used as a test sets.
+
+```{r}
+require("standardize")
+set.seed(654321)
+NN <- length(dat_for_analysis_sub$NOTCOV)
+restrict_1 <- as.logical(runif(NN) < 0.15) # use fraction as training data
+summary(restrict_1)
+dat_train <- subset(dat_for_analysis_sub, restrict_1)
+dat_test <- subset(dat_for_analysis_sub, !restrict_1)
+sobj <- standardize(NOTCOV ~ Age + female + AfAm + Asian + RaceOther + Hispanic + 
+                      educ_hs + educ_smcoll + educ_as + educ_bach + educ_adv + 
+                      married + widowed + divorc_sep + 
+                      Region.Midwest + Region.South + Region.West + 
+                      born.Mex.CentAm.Carib + born.S.Am + born.Eur + born.f.USSR + 
+                      born.Africa + born.MidE + born.India.subc + born.Asia + 
+                      born.SE.Asia + born.elsewhere + born.unknown, dat_train, family = binomial)
+s_dat_test <- predict(sobj, dat_test)
+```
+
+
+
+# LPM
+
+```{r}
+model_lpm1 <- lm(sobj$formula, data = sobj$data)
+summary(model_lpm1)
+pred_vals_lpm <- predict(model_lpm1, s_dat_test)
+pred_model_lpm1 <- (pred_vals_lpm > 0.45)
+table(pred = pred_model_lpm1, true = dat_test$NOTCOV)
+```
+
+
+
+# Logit
+```{r}
+model_logit1 <- glm(sobj$formula, family = binomial, data = sobj$data)
+summary(model_logit1)
+pred_vals <- predict(model_logit1, s_dat_test, type = "response")
+pred_model_logit1 <- (pred_vals > 0.45)
+table(pred = pred_model_logit1, true = dat_test$NOTCOV)
+```
+
+As we standardized variables the coefficients estimated by LPM regression are not similar with vlues in Logit regression. In addition, the effect of each variebles into estimating have in some caises are different when comparing two regressions, which is not expected. As Logit regression represents probabilities which are within interval of [0,1] the Logit regression is more straightforward in stimating a health insurance coverage.
+Both regression exrerienced a change of predvals parametrs from > 0.5 to > 0.45, which made regressions more acurate in estimatin. 
+
+
+
+# Random Forest Model
+```{r}
+require('randomForest')
+set.seed(54321)
+model_randFor <- randomForest(as.factor(NOTCOV) ~ ., data = sobj$data, importance=TRUE, proximity=TRUE)
+print(model_randFor)
+round(importance(model_randFor),2)
+varImpPlot(model_randFor)
+# look at confusion matrix for this too
+pred_model1 <- predict(model_randFor,  s_dat_test)
+table(pred = pred_model1, true = dat_test$NOTCOV)
+```
+
+Random Forest model is more acuratly provides an insigt into variables which are more important to increase an acuracy of estimation. As ew expected, the education level is more importat in determining a health insurance coverage in comparison with other variables.
+
+
+
+# Support Vector Machines
+
+```{r}
+require(e1071)
+# tuned_parameters <- tune.svm(as.factor(NOTCOV) ~ ., data = sobj$data, gamma = 10^(-3:0), cost = 10^(-2:1)) 
+# summary(tuned_parameters)
+# figure best parameters and input into next
+svm.model <- svm(as.factor(NOTCOV) ~ ., data = sobj$data, cost = 10, gamma = 0.1)
+svm.pred <- predict(svm.model, s_dat_test)
+table(pred = svm.pred, true = dat_test$NOTCOV)
+```
+
+
+
+# Elastic Net
+```{r}
+# Elastic Net
+require(glmnet)
+model1_elasticnet <-  glmnet(as.matrix(sobj$data[,-1]),sobj$data$NOTCOV) 
+# default is alpha = 1, lasso
+
+par(mar=c(4.5,4.5,1,4))
+plot(model1_elasticnet)
+vnat=coef(model1_elasticnet)
+vnat=vnat[-1,ncol(vnat)] # remove the intercept, and get the coefficients at the end of the path
+axis(4, at=vnat,line=-.5,label=names(sobj$data[,-1]),las=1,tick=FALSE, cex.axis=0.45) 
+
+plot(model1_elasticnet, xvar = "lambda")
+plot(model1_elasticnet, xvar = "dev", label = TRUE)
+print(model1_elasticnet)
+
+cvmodel1_elasticnet = cv.glmnet(data.matrix(sobj$data[,-1]),data.matrix(sobj$data$NOTCOV)) 
+cvmodel1_elasticnet$lambda.min
+log(cvmodel1_elasticnet$lambda.min)
+coef(cvmodel1_elasticnet, s = "lambda.min")
+
+pred1_elasnet <- predict(model1_elasticnet, newx = data.matrix(s_dat_test), s = cvmodel1_elasticnet$lambda.min)
+pred_model1_elasnet <- (pred1_elasnet < mean(pred1_elasnet)) 
+table(pred = pred_model1_elasnet, true = dat_test$NOTCOV)
+
+model2_elasticnet <-  glmnet(as.matrix(sobj$data[,-1]),sobj$data$NOTCOV, alpha = 0) 
+# or try different alpha values to see if you can improve
+```
+
+The Elastic Net regression alows to identify which variables are most important in our model. The education level and merital status as of married increases probability of individual to have a health insurance coverage. This results support intuition where meried people with good education will have higher income and better quaity of life. Thus, will highly motivated to have a health insurance.
+
+
+
+## Conclution
+
+The Elastic Net regression function is the most accurate in estimating probabily of individuals to have a healthcare insurance coverage. We belive that education level and merital status (particularly weather individual is merried or not) is the most important variableble accuratly etimating the probability of having insurance coverage.
+
+
+
+## Final project
+In our final project we want to estimate the househal income in different groups of individuals based on their educational levels, geographic locations and origins.
+The Census 2017 data will be used in this project
+We will use following article for start:
+"Can income differences explain the racial wealth gap? A quantitative analysis" by Hero Ashman and Seth Neumuller.
+"Quantitative Analysis of the Regional Income Determinant Factors in a Remote Island Economy: Generation and Application of a Regional Input-Output Table" by Takashi Fujimoto.
